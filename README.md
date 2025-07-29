@@ -1,8 +1,12 @@
 # audio-transcription-service-flask
-Este é um projeto de backend em Python que oferece um serviço de transcrição de áudio para texto (Speech-to-Text) utilizando o microframework Flask e a biblioteca SpeechRecognition. Ele permite o upload de arquivos de áudio (como MP3, WAV, M4A) e retorna o texto transcrito.
+Este é um projeto de backend em Python que oferece um serviço de transcrição de áudio para texto (Speech-to-Text) utilizando o microframework Flask e a biblioteca SpeechRecognition. A principal melhoria desta versão é a implementação de processamento assíncrono para lidar com áudios longos sem bloquear o servidor, utilizando Celery como fila de tarefas e Redis como broker/backend.
 🚀 Funcionalidades
 
     Recebe arquivos de áudio via requisições POST.
+
+    Processamento Assíncrono: Descarrega a tarefa de transcrição para workers Celery, respondendo imediatamente ao cliente.
+
+    Consulta de Status: Permite que o cliente verifique o progresso e o resultado da transcrição através de um ID de tarefa.
 
     Converte automaticamente diversos formatos de áudio para WAV para processamento.
 
@@ -10,19 +14,25 @@ Este é um projeto de backend em Python que oferece um serviço de transcrição
 
     Remove arquivos temporários após a transcrição.
 
-    Tratamento de erros para áudios ininteligíveis ou problemas de serviço.
+    Tratamento de erros robusto para áudios ininteligíveis ou problemas de serviço.
 
 🛠️ Tecnologias Utilizadas
 
-    Python 3.x
+    Python 3.8+
 
     Flask: Microframework web para Python.
+
+    Celery: Sistema de fila de tarefas para processamento assíncrono.
+
+    Redis: Banco de dados em memória, utilizado como broker de mensagens e backend de resultados para o Celery.
 
     SpeechRecognition: Biblioteca Python para reconhecimento de fala, atuando como interface para diversas APIs de ASR.
 
     Pydub: Biblioteca Python para manipulação de áudio, utilizada para conversão de formatos.
 
     FFmpeg: Ferramenta externa essencial para a pydub lidar com diferentes formatos de áudio.
+
+    Eventlet: Biblioteca de concorrência utilizada pelo Celery worker no Windows para evitar problemas de permissão.
 
 ⚙️ Instalação e Configuração
 
@@ -33,11 +43,21 @@ Siga os passos abaixo para configurar e executar o projeto localmente.
 
     FFmpeg: O pydub requer o FFmpeg instalado no seu sistema e acessível via PATH.
 
-        Windows: Baixe a versão full ou essentials em formato .zip ou .7z de gyan.dev/ffmpeg/builds/ (ou BtbN). Descompacte a pasta bin em um local fixo (ex: C:\ffmpeg\bin) e adicione este caminho às variáveis de ambiente do sistema (Path). Lembre-se de reiniciar o terminal após adicionar ao PATH.
+        Windows: Baixe a versão full ou essentials em formato .zip ou .7z de gyan.dev/ffmpeg/builds/. Descompacte a pasta bin em um local fixo (ex: C:\ffmpeg\bin) e adicione este caminho às variáveis de ambiente do sistema (Path). Lembre-se de reiniciar o terminal após adicionar ao PATH.
 
         macOS: brew install ffmpeg
 
         Linux: sudo apt-get install ffmpeg (Debian/Ubuntu)
+
+    Redis Server: O Celery precisa de um servidor Redis rodando.
+
+        Windows: Baixe o instalador .msi de github.com/microsoftarchive/redis/releases. Durante a instalação, marque as opções para "Add Redis to your PATH" e "Install Redis as a Windows Service" e mantenha a porta padrão 6379.
+
+        macOS: brew install redis && brew services start redis
+
+        Linux: sudo apt update && sudo apt install redis-server && sudo systemctl enable redis-server && sudo systemctl start redis-server
+
+        Verificação: Abra um novo terminal e digite redis-cli ping. A resposta deve ser PONG.
 
 2. Clonar o Repositório
 
@@ -68,21 +88,35 @@ Ative o ambiente virtual:
 
 Com o ambiente virtual ativado, instale as bibliotecas Python necessárias:
 
-pip install Flask SpeechRecognition pydub PyAudio ffmpeg-python
+pip install Flask SpeechRecognition pydub PyAudio ffmpeg-python celery redis eventlet
 
-🚀 Como Usar
-1. Iniciar o Servidor Flask
+🚀 Como Usar (Fluxo Assíncrono)
+
+Para usar o serviço, você precisará de dois terminais abertos simultaneamente: um para o servidor Flask e outro para o worker Celery.
+1. Iniciar o Servidor Flask (Terminal 1)
 
 Com o ambiente virtual ativado e dentro da pasta raiz do projeto, execute:
 
 python app.py
 
 O servidor será iniciado e você verá uma mensagem indicando que ele está rodando em http://127.0.0.1:5000/. Mantenha este terminal aberto.
-2. Testar a API de Transcrição
+2. Iniciar o Celery Worker (Terminal 2)
+
+Abra um novo terminal, ative o ambiente virtual (Passo 3) e execute o worker Celery. No Windows, é essencial usar --pool=eventlet devido a problemas de concorrência.
+
+# Navegue para a pasta do projeto e ative o ambiente virtual
+cd audio-transcription-service-flask
+.\venv\Scripts\activate # ou source venv/bin/activate para macOS/Linux/Git Bash
+
+# Inicie o Celery Worker
+python -m celery -A app.celery worker --loglevel=info --pool=eventlet
+
+Mantenha este terminal aberto também. Você verá mensagens do Celery indicando que ele está pronto para receber tarefas.
+3. Testar a API de Transcrição
 
 Você pode usar ferramentas como Postman ou curl para enviar arquivos de áudio para a API.
 
-    Endpoint: http://127.0.0.1:5000/transcrever
+    Endpoint de Início da Transcrição: http://127.0.0.1:5000/transcrever
 
     Método: POST
 
@@ -92,47 +126,86 @@ Você pode usar ferramentas como Postman ou curl para enviar arquivos de áudio 
 
     Valor (Value): Selecione o arquivo de áudio (tipo File).
 
-Exemplo com Postman
+Exemplo de Fluxo com Postman
 
-    Crie uma nova requisição POST.
+    Enviar Áudio (Requisição POST):
 
-    Defina a URL como http://127.0.0.1:5000/transcrever.
+        Crie uma nova requisição POST para http://127.0.0.1:5000/transcrever.
 
-    Vá para a aba Body e selecione form-data.
+        Vá para a aba Body, selecione form-data.
 
-    Adicione uma Key chamada arquivo_audio.
+        Adicione a Key arquivo_audio, mude o tipo do Value para File e selecione seu arquivo de áudio.
 
-    Mude o tipo do Value para File e selecione seu arquivo de áudio (.mp3, .wav, .m4a, etc.).
+        Clique em Send.
 
-    Clique em Send.
+        Resposta (Status 202 Accepted): Você receberá imediatamente um task_id e uma status_url.
 
-Exemplo com cURL
+        {
+            "message": "Transcrição iniciada. Consulte o status com o ID da tarefa.",
+            "task_id": "SEU_ID_DA_TAREFA_AQUI",
+            "status_url": "http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI"
+        }
 
-Abra um novo terminal e execute (substitua seu_audio.mp3 pelo caminho e nome do seu arquivo de áudio):
+        No terminal do Celery Worker, você verá mensagens indicando o recebimento e processamento da tarefa.
 
-curl -X POST -F "arquivo_audio=@seu_audio.mp3" http://127.0.0.1:5000/transcrever
+    Consultar Status da Transcrição (Requisição GET):
 
-3. Resposta da API
+        Crie uma nova requisição GET.
 
-A API retornará uma resposta JSON com o texto transcrito ou uma mensagem de erro:
+        Defina a URL como a status_url que você recebeu (ex: http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI).
 
-Sucesso (Status 200 OK):
+        Clique em Send repetidamente para ver o status mudar.
 
-{
-    "transcription": "Olá, isso é um teste de transcrição de áudio."
-}
+4. Respostas da API
+Endpoint POST /transcrever
 
-Erro (Status 400 Bad Request ou 500 Internal Server Error):
+    Sucesso (Status 202 Accepted):
 
-{
-    "error": "Não foi possível entender o áudio."
-}
+    {
+        "message": "Transcrição iniciada. Consulte o status com o ID da tarefa.",
+        "task_id": "ID_DA_TAREFA",
+        "status_url": "URL_PARA_STATUS_DA_TAREFA"
+    }
 
-ou
+    Erro (Status 400 Bad Request):
 
-{
-    "error": "Erro de serviço: [detalhes do erro]"
-}
+    {
+        "error": "Nenhum arquivo de áudio enviado."
+    }
+
+Endpoint GET /status/<task_id>
+
+    Pendente ou Em Progresso (Status 200 OK):
+
+    {
+        "state": "PENDING",
+        "status": "Tarefa pendente ou não encontrada."
+    }
+
+    ou
+
+    {
+        "state": "PROGRESS",
+        "status": "Processando áudio..."
+    }
+
+    Concluído com Sucesso (Status 200 OK):
+
+    {
+        "state": "SUCCESS",
+        "result": {
+            "status": "Concluído",
+            "transcription": "Seu texto transcrito aqui."
+        }
+    }
+
+    Falha (Status 200 OK - erro retornado dentro do JSON):
+
+    {
+        "state": "FAILURE",
+        "status": "Tarefa falhou.",
+        "error": "Não foi possível entender o áudio."
+    }
 
 📄 API Endpoints
 
@@ -140,11 +213,11 @@ ou
 
         Descrição: Retorna uma mensagem de boas-vindas para verificar se o servidor está ativo.
 
-        Resposta: Bem-vindo ao serviço de transcrição de áudio!
+        Resposta: Bem-vindo ao serviço de transcrição de áudio assíncrona!
 
     POST /transcrever
 
-        Descrição: Recebe um arquivo de áudio e retorna sua transcrição textual.
+        Descrição: Inicia uma tarefa assíncrona para transcrever um arquivo de áudio.
 
         Parâmetros da Requisição (form-data):
 
@@ -152,11 +225,21 @@ ou
 
         Respostas:
 
-            200 OK: {"transcription": "texto transcrito"}
+            202 Accepted: {"message": "...", "task_id": "...", "status_url": "..."}
 
-            400 Bad Request: {"error": "Nenhum arquivo de áudio enviado."} ou {"error": "Nome do arquivo inválido."} ou {"error": "Não foi possível entender o áudio."}
+            400 Bad Request: {"error": "..."}
 
-            500 Internal Server Error: {"error": "Erro de serviço: [detalhes]"} ou {"error": "Ocorreu um erro inesperado: [detalhes]"}
+    GET /status/<task_id>
+
+        Descrição: Consulta o status e o resultado de uma tarefa de transcrição.
+
+        Parâmetros de URL:
+
+            task_id (string): O ID da tarefa retornado pelo endpoint /transcrever.
+
+        Respostas:
+
+            200 OK: {"state": "PENDING"|"PROGRESS"|"SUCCESS"|"FAILURE", "status": "...", "result": {...}}
 
 ⚠️ Tratamento de Erros
 
@@ -168,7 +251,7 @@ O serviço inclui tratamento de erros para:
 
     Exception: Quaisquer outros erros inesperados durante o processamento.
 
-Em caso de erro, os arquivos temporários são limpos e uma mensagem JSON com o erro é retornada.
+Em caso de erro, os arquivos temporários são limpos e uma mensagem JSON com o erro é retornada no resultado da tarefa.
 📜 Licença
 
 Este projeto está licenciado sob a Licença MIT. Veja o arquivo LICENSE para mais detalhes.
