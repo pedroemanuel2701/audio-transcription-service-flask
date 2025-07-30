@@ -24,3 +24,6 @@ uploads/
 # Ignorar arquivos de sistema operacional
 .DS_Store # macOS
 Thumbs.db # Windows
+
+# ignorar arquivos de log
+app.log

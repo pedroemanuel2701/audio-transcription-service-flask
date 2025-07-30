@@ -1,5 +1,10 @@
 # audio-transcription-service-flask
 Este é um projeto de backend em Python que oferece um serviço de transcrição de áudio para texto (Speech-to-Text) utilizando o microframework Flask e a biblioteca SpeechRecognition. A principal melhoria desta versão é a implementação de processamento assíncrono para lidar com áudios longos sem bloquear o servidor, utilizando Celery como fila de tarefas e Redis como broker/backend.
+⚠️ AVISO IMPORTANTE: BUG CONHECIDO ⚠️
+
+Atualmente, a tarefa de transcrição (tarefa_transcrever_audio) está enfrentando um bug de travamento/falha silenciosa após a etapa de "Iniciando reconhecimento de fala..." no Celery Worker. Isso impede que a transcrição seja concluída com sucesso.
+
+Estamos trabalhando na correção deste problema, que provavelmente está relacionado à compatibilidade entre a biblioteca SpeechRecognition e o pool de concorrência do Celery no ambiente Windows. A próxima etapa de depuração envolve a mudança do pool para threads.
 🚀 Funcionalidades
 
     Recebe arquivos de áudio via requisições POST.
@@ -8,13 +13,15 @@ Este é um projeto de backend em Python que oferece um serviço de transcrição
 
     Consulta de Status: Permite que o cliente verifique o progresso e o resultado da transcrição através de um ID de tarefa.
 
-    Converte automaticamente diversos formatos de áudio para WAV para processamento.
+    Converte automaticamente diversos formatos de áúdio para WAV para processamento.
 
     Transcreve áudio para texto utilizando a API de reconhecimento de fala do Google (Web Speech API).
 
     Remove arquivos temporários após a transcrição.
 
-    Tratamento de erros robusto para áudios ininteligíveis ou problemas de serviço.
+    Tratamento de erros robusto para áudios ininteligíveis ou problemas de serviço, com mensagens de erro detalhadas.
+
+    Logs detalhados para depuração e monitoramento (salvos em app.log e exibidos no console).
 
 🛠️ Tecnologias Utilizadas
 
@@ -32,7 +39,7 @@ Este é um projeto de backend em Python que oferece um serviço de transcrição
 
     FFmpeg: Ferramenta externa essencial para a pydub lidar com diferentes formatos de áudio.
 
-    Eventlet: Biblioteca de concorrência utilizada pelo Celery worker no Windows para evitar problemas de permissão.
+    Eventlet: Biblioteca de concorrência utilizada pelo Celery worker no Windows (atualmente em depuração).
 
 ⚙️ Instalação e Configuração
 
@@ -92,24 +99,28 @@ pip install Flask SpeechRecognition pydub PyAudio ffmpeg-python celery redis eve
 
 🚀 Como Usar (Fluxo Assíncrono)
 
-Para usar o serviço, você precisará de dois terminais abertos simultaneamente: um para o servidor Flask e outro para o worker Celery.
+Para usar o serviço, você precisará de dois terminais abertos simultaneamente (no VS Code, por exemplo): um para o servidor Flask e outro para o worker Celery.
 1. Iniciar o Servidor Flask (Terminal 1)
 
 Com o ambiente virtual ativado e dentro da pasta raiz do projeto, execute:
 
-python app.py
+set FLASK_APP=tasks.py # Para Windows CMD/PowerShell
+# export FLASK_APP=tasks.py # Para macOS/Linux/Git Bash
+flask run --host=127.0.0.1 --port=5000 --debug
 
 O servidor será iniciado e você verá uma mensagem indicando que ele está rodando em http://127.0.0.1:5000/. Mantenha este terminal aberto.
 2. Iniciar o Celery Worker (Terminal 2)
 
-Abra um novo terminal, ative o ambiente virtual (Passo 3) e execute o worker Celery. No Windows, é essencial usar --pool=eventlet devido a problemas de concorrência.
+Abra um novo terminal, ative o ambiente virtual (Passo 3) e execute o worker Celery.
 
 # Navegue para a pasta do projeto e ative o ambiente virtual
 cd audio-transcription-service-flask
 .\venv\Scripts\activate # ou source venv/bin/activate para macOS/Linux/Git Bash
 
-# Inicie o Celery Worker
-python -m celery -A app.celery worker --loglevel=info --pool=eventlet
+# Inicie o Celery Worker (usando --pool=threads para depuração do bug)
+python -m celery -A tasks.celery worker --loglevel=debug --pool=threads
+
+Nota: O loglevel=debug é para depuração e deve ser alterado para info em produção. O pool=threads é uma tentativa de solução para o bug atual no Windows.
 
 Mantenha este terminal aberto também. Você verá mensagens do Celery indicando que ele está pronto para receber tarefas.
 3. Testar a API de Transcrição
@@ -138,12 +149,12 @@ Exemplo de Fluxo com Postman
 
         Clique em Send.
 
-        Resposta (Status 202 Accepted): Você receberá imediatamente um task_id e uma status_url.
+        Resposta (Status 202 Accepted): Você receberá imediatamente um id_tarefa e uma url_status.
 
         {
-            "message": "Transcrição iniciada. Consulte o status com o ID da tarefa.",
-            "task_id": "SEU_ID_DA_TAREFA_AQUI",
-            "status_url": "http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI"
+            "mensagem": "Transcrição iniciada. Consulte o status com o ID da tarefa.",
+            "id_tarefa": "SEU_ID_DA_TAREFA_AQUI",
+            "url_status": "http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI"
         }
 
         No terminal do Celery Worker, você verá mensagens indicando o recebimento e processamento da tarefa.
@@ -152,7 +163,7 @@ Exemplo de Fluxo com Postman
 
         Crie uma nova requisição GET.
 
-        Defina a URL como a status_url que você recebeu (ex: http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI).
+        Defina a URL como a url_status que você recebeu (ex: http://127.0.0.1:5000/status/SEU_ID_DA_TAREFA_AQUI).
 
         Clique em Send repetidamente para ver o status mudar.
 
@@ -162,15 +173,15 @@ Endpoint POST /transcrever
     Sucesso (Status 202 Accepted):
 
     {
-        "message": "Transcrição iniciada. Consulte o status com o ID da tarefa.",
-        "task_id": "ID_DA_TAREFA",
-        "status_url": "URL_PARA_STATUS_DA_TAREFA"
+        "mensagem": "...",
+        "id_tarefa": "...",
+        "url_status": "..."
     }
 
     Erro (Status 400 Bad Request):
 
     {
-        "error": "Nenhum arquivo de áudio enviado."
+        "erro": "..."
     }
 
 Endpoint GET /status/<task_id>
@@ -178,33 +189,33 @@ Endpoint GET /status/<task_id>
     Pendente ou Em Progresso (Status 200 OK):
 
     {
-        "state": "PENDING",
+        "estado": "PENDING",
         "status": "Tarefa pendente ou não encontrada."
     }
 
     ou
 
     {
-        "state": "PROGRESS",
+        "estado": "PROGRESS",
         "status": "Processando áudio..."
     }
 
     Concluído com Sucesso (Status 200 OK):
 
     {
-        "state": "SUCCESS",
-        "result": {
+        "estado": "SUCCESS",
+        "resultado": {
             "status": "Concluído",
-            "transcription": "Seu texto transcrito aqui."
+            "transcricao": "Seu texto transcrito aqui."
         }
     }
 
     Falha (Status 200 OK - erro retornado dentro do JSON):
 
     {
-        "state": "FAILURE",
+        "estado": "FAILURE",
         "status": "Tarefa falhou.",
-        "error": "Não foi possível entender o áudio."
+        "erro": "Mensagem de erro detalhada da exceção."
     }
 
 📄 API Endpoints
@@ -225,9 +236,9 @@ Endpoint GET /status/<task_id>
 
         Respostas:
 
-            202 Accepted: {"message": "...", "task_id": "...", "status_url": "..."}
+            202 Accepted: {"mensagem": "...", "id_tarefa": "...", "url_status": "..."}
 
-            400 Bad Request: {"error": "..."}
+            400 Bad Request: {"erro": "..."}
 
     GET /status/<task_id>
 
@@ -239,7 +250,7 @@ Endpoint GET /status/<task_id>
 
         Respostas:
 
-            200 OK: {"state": "PENDING"|"PROGRESS"|"SUCCESS"|"FAILURE", "status": "...", "result": {...}}
+            200 OK: {"estado": "PENDING"|"PROGRESS"|"SUCCESS"|"FAILURE", "status": "...", "resultado": {...}|"erro": "..."}
 
 ⚠️ Tratamento de Erros
 
