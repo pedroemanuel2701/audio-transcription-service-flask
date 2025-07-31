@@ -1,17 +1,17 @@
-from flask import Flask, request, jsonify, url_for
-import speech_recognition as sr
-from pydub import AudioSegment
-import os
-from celery import Celery
-from celery.result import AsyncResult
-from celery.utils.log import get_logger
-import logging
+from flask import Flask, request, jsonify, url_for  # Importando Flask e módulos necessários
+import speech_recognition as sr                     # Importando o módulo de reconhecimento de fala
+from pydub import AudioSegment                      # Importando o módulo para manipulação de áudio
+import os                                           # Importando módulo para manipulação de arquivos e diretórios
+from celery import Celery                           # Importando Celery para tarefas assíncronas 
+from celery.result import AsyncResult               # Importando AsyncResult para verificar o status das tarefas
+from celery.utils.log import get_logger             # Importando get_logger para logging do Celery
+import logging                                      # Importando módulo de logging para registrar eventos
 
 app = Flask(__name__)
 
 # arquivos de áudio serão salvos de forma temporária
 PASTA_UPLOADS = 'uploads'
-if not os.path.exists(PASTA_UPLOADS):
+if not os.path.exists(PASTA_UPLOADS): 
     os.makedirs(PASTA_UPLOADS)
 
 app.config['UPLOAD_FOLDER'] = PASTA_UPLOADS

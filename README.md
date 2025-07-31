@@ -1,10 +1,5 @@
 # audio-transcription-service-flask
 Este é um projeto de backend em Python que oferece um serviço de transcrição de áudio para texto (Speech-to-Text) utilizando o microframework Flask e a biblioteca SpeechRecognition. A principal melhoria desta versão é a implementação de processamento assíncrono para lidar com áudios longos sem bloquear o servidor, utilizando Celery como fila de tarefas e Redis como broker/backend.
-⚠️ AVISO IMPORTANTE: BUG CONHECIDO ⚠️
-
-Atualmente, a tarefa de transcrição (tarefa_transcrever_audio) está enfrentando um bug de travamento/falha silenciosa após a etapa de "Iniciando reconhecimento de fala..." no Celery Worker. Isso impede que a transcrição seja concluída com sucesso.
-
-Estamos trabalhando na correção deste problema, que provavelmente está relacionado à compatibilidade entre a biblioteca SpeechRecognition e o pool de concorrência do Celery no ambiente Windows. A próxima etapa de depuração envolve a mudança do pool para threads.
 🚀 Funcionalidades
 
     Recebe arquivos de áudio via requisições POST.
@@ -13,7 +8,7 @@ Estamos trabalhando na correção deste problema, que provavelmente está relaci
 
     Consulta de Status: Permite que o cliente verifique o progresso e o resultado da transcrição através de um ID de tarefa.
 
-    Converte automaticamente diversos formatos de áúdio para WAV para processamento.
+    Suporte a Múltiplos Formatos de Áudio/Vídeo: Converte automaticamente diversos formatos de áudio (e extrai áudio de vídeo) para WAV para processamento, incluindo .wav, .mp3, .m4a, .ogg, .mp4, .flac, .aiff, .webm.
 
     Transcreve áudio para texto utilizando a API de reconhecimento de fala do Google (Web Speech API).
 
@@ -37,9 +32,9 @@ Estamos trabalhando na correção deste problema, que provavelmente está relaci
 
     Pydub: Biblioteca Python para manipulação de áudio, utilizada para conversão de formatos.
 
-    FFmpeg: Ferramenta externa essencial para a pydub lidar com diferentes formatos de áudio.
+    FFmpeg: Ferramenta externa essencial para a pydub lidar com diferentes formatos de áudio/vídeo.
 
-    Eventlet: Biblioteca de concorrência utilizada pelo Celery worker no Windows (atualmente em depuração).
+    Greenlet (via eventlet): Biblioteca de concorrência utilizada pelo Celery worker no Windows, com o pool threads para estabilidade.
 
 ⚙️ Instalação e Configuração
 
@@ -117,10 +112,8 @@ Abra um novo terminal, ative o ambiente virtual (Passo 3) e execute o worker Cel
 cd audio-transcription-service-flask
 .\venv\Scripts\activate # ou source venv/bin/activate para macOS/Linux/Git Bash
 
-# Inicie o Celery Worker (usando --pool=threads para depuração do bug)
-python -m celery -A tasks.celery worker --loglevel=debug --pool=threads
-
-Nota: O loglevel=debug é para depuração e deve ser alterado para info em produção. O pool=threads é uma tentativa de solução para o bug atual no Windows.
+# Inicie o Celery Worker (usando --pool=threads para estabilidade no Windows)
+python -m celery -A tasks.celery worker --loglevel=info --pool=threads
 
 Mantenha este terminal aberto também. Você verá mensagens do Celery indicando que ele está pronto para receber tarefas.
 3. Testar a API de Transcrição
